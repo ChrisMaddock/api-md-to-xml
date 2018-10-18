@@ -1,5 +1,8 @@
 require 'nokogiri'
 require 'cgi'
+require 'net/http'
+require 'uri'
+require 'final_redirect_url'
 
 def resolveLinks(captures)
 
@@ -14,8 +17,46 @@ def resolveLinks(captures)
         return nil
     end
 
+    # Redirection
+    if link.start_with?("http")
+        begin
+            redirected = FinalRedirectUrl.final_redirect_url(link)
+            puts "Redirected is: [#{redirected}]"
+            link = redirected.to_s
+        rescue 
+            puts "EXCEPTION"
+        end
+    end
+
+    if link.start_with?("http://")
+        begin
+            url = URI.parse(link.sub("http://", "https://"))
+            req = Net::HTTP::Get.new(url.path)
+            response = Net::HTTP.start( url.host, url.port ) { |http| http.request( req ) }
+            code = response.code
+
+            if (code == "200")
+                link.sub!("http://", "https://")
+            end
+
+        rescue  #fail silently for now
+        end
+    end
+
+    if link.start_with?("https://docs.microsoft.com/en-us")
+        link.sub!("/en-us", "")
+    end
+
     if link.start_with?("~/docs")
         link.sub!("~/docs", "https://docs.microsoft.com/dotnet")
+        if (link.end_with?(".md"))
+            link.sub!(".md", "")
+        end
+    elsif link.start_with?("/")
+        link.sub!("/", "https://docs.microsoft.com/")
+        if (link.end_with?(".md"))
+            link.sub!(".md", "")
+        end
     end
 
     return "<see href=\"%s\">%s</see>" % [CGI::escapeHTML(link), CGI::escapeHTML(title)]
@@ -52,6 +93,10 @@ files.each do |file|
         regex = Regexp.new(regexStr)
 
         matches = regex.match(fileIn)
+
+        if matches.nil?
+            next
+        end
 
         oldSummary = matches.captures[0]
         newSummary = oldSummary.gsub(CGI::escapeHTML(oldLink), newLink)
